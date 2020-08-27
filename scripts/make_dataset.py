@@ -1,39 +1,35 @@
-import os
-import numpy as np
-from multiprocessing import Pool
 import pickle
+from collections import Counter
+from pathlib import Path
 
-
-def process_audios(feat_fn):
-    feat_fp = os.path.join(feat_dir, f'{feat_fn}.npy')
-
-    if os.path.exists(feat_fp):
-        return feat_fn, np.load(feat_fp).shape[-1]
-    else:
-        return feat_fn, 0
-
+import numpy as np
 
 if __name__ == "__main__":
-    feat_type = 'mel'
-    exp_dir = './training_data/exp_data/'  # base_out_dir from step2
-
-    out_fp = os.path.join(exp_dir, 'dataset.pkl')
+    feat_type = "mel"
+    exp_dir = Path("./training_data/exp_data/")  # base_out_dir from step2
 
     # ### Process ###
-    feat_dir = os.path.join(exp_dir, feat_type)
+    feat_dir = exp_dir / feat_type
+    feat_paths = sorted(feat_dir.glob("*.npy"))
 
-    feat_fns = [fn.replace('.npy', '') for fn in os.listdir(feat_dir)]
+    # feat_fns = [path.stem for path in feat_paths]
 
-    pool = Pool(processes=20)
-    dataset = []
+    dataset = [(path.stem, np.load(path).shape[-1]) for path in feat_paths]
 
-    for i, (feat_fn, length) in enumerate(pool.imap_unordered(process_audios, feat_fns), 1):
-        print(feat_fn)
-        if length == 0:
-            continue
-        dataset += [(feat_fn, length)]
+    # Remove mels with different length.
+    # Currently causes exception in training code:
+    #
+    #     RuntimeError: stack expects each tensor to be equal size,
+    #     but got [80, 861] at entry 0 and [80, 27] at entry 3
+    length_counter = Counter(length for _, length in dataset)
+    dataset = [
+        (id, length)
+        for id, length in dataset
+        if length == length_counter.most_common()[0][0]
+    ]
 
-    with open(out_fp, 'wb') as f:
+    out_path = exp_dir / "dataset.pkl"
+    with open(out_path, "wb") as f:
         pickle.dump(dataset, f)
 
-    print(len(dataset))
+    print(f"Dataset length: {len(dataset)}")
