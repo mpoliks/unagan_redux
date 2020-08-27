@@ -1,22 +1,24 @@
 # import glob
-import os
 import librosa
 import numpy as np
+import warnings
+from pathlib import Path
+from joblib import Parallel, delayed
+
+
 # from utils.display import *
 # from utils.dsp import *
 # import hparams as hp
-# from multiprocessing import Pool, cpu_count
-from multiprocessing import Pool
 from librosa.filters import mel as librosa_mel_fn
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 
-'''
+"""
 Modified from
 https://github.com/descriptinc/melgan-neurips/blob/master/mel2wav/modules.py#L26
-'''
+"""
 
 
 class Audio2Mel(nn.Module):
@@ -65,8 +67,13 @@ class Audio2Mel(nn.Module):
         return log_mel_spec
 
 
-def convert_file(path):
-    y, _ = librosa.load(path, sr=sr)
+def convert_file(extract_func, sampling_rate, path):
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message="PySoundFile failed. Trying audioread instead."
+        )
+        y, _ = librosa.load(path, sr=sampling_rate)
+
     peak = np.abs(y).max()
     if peak_norm or peak > 1.0:
         y /= peak
@@ -76,61 +83,48 @@ def convert_file(path):
     mel = extract_func(y)
     mel = mel.numpy()
     mel = mel[0]
-    print(mel.shape)
+    # print(mel.shape)
 
     return mel.astype(np.float32)
 
 
-def process_audios(path):
-    id = path.split('/')[-1][:-4]
+def process_clip(extract_func, sampling_rate, base_out_dir, clip_path):
+    id = Path(clip_path).stem
 
-    out_dir = os.path.join(base_out_dir, feat_type)
-    os.makedirs(out_dir, exist_ok=True)
+    out_dir = base_out_dir / "mel"
+    out_dir.mkdir(exist_ok=True, parents=True)
 
-    out_fp = os.path.join(out_dir, f'{id}.npy')
+    out_fp = out_dir / f"{id}.npy"
 
-    if os.path.exists(out_fp):
-        print('Done before')
-        return id, 0
+    if out_fp.exists():
+        print(f"Clip {out_fp} exists. Done before.")
+        return
 
-    try:
-        m = convert_file(path)
-
-        np.save(out_fp, m, allow_pickle=False)
-    except Exception:
-        return id, 0
-    return id, m.shape[-1]
+    mel = convert_file(extract_func, sampling_rate, clip_path)
+    np.save(out_fp, mel, allow_pickle=False)
 
 
 if __name__ == "__main__":
-    base_out_dir = './training_data/exp_data/'
-    clip_dir = './training_data/clips/'  # out_dir from step1
+    base_out_dir = Path("./training_data/exp_data/")
+    clip_dir = Path("./training_data/clips/")  # out_dir from step1
 
-    feat_type = 'mel'
-    extension = '.mp3'
+    feat_type = "mel"
+    extension = ".mp3"
     peak_norm = True
 
     n_fft = 1024
     hop_length = 256
     win_length = 1024
-    sampling_rate = 22050
     n_mel_channels = 80
+    sampling_rate = 22050
 
     # ### Process ###
-    extract_func = Audio2Mel(n_fft, hop_length, win_length, sampling_rate, n_mel_channels)
-    sr = sampling_rate
+    extract_func = Audio2Mel(
+        n_fft, hop_length, win_length, sampling_rate, n_mel_channels
+    )
 
-    audio_fns = [fn for fn in os.listdir(clip_dir) if fn.endswith(extension)]
-
-    audio_fns = sorted(list(audio_fns))
-
-    audio_files = [os.path.join(clip_dir, fn) for fn in audio_fns]
-
-    pool = Pool(processes=20)
-    dataset = []
-
-    for i, (id, length) in enumerate(pool.imap_unordered(process_audios, audio_files), 1):
-        print(id)
-        if length == 0:
-            continue
-        dataset += [(id, length)]
+    clip_paths = sorted(clip_dir.glob("*.mp3"))
+    Parallel(n_jobs=-1, verbose=2, pre_dispatch="all")(
+        delayed(process_clip)(extract_func, sampling_rate, base_out_dir, clip_path)
+        for clip_path in clip_paths
+    )
