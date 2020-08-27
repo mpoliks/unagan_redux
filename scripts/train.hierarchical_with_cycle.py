@@ -33,7 +33,8 @@ class VocDataset(Dataset):
 
     def __getitem__(self, index):
         id = self.metadata[index]
-        voc_fp = os.path.join(self.path, id, 'vocals.npy')
+        # voc_fp = os.path.join(self.path, id, "vocals.npy")
+        voc_fp = os.path.join(self.path, f"{id}.npy")
 
         voc = np.load(voc_fp)
 

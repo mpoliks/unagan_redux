@@ -89,4 +89,9 @@ samples/
 python scripts/collect_audio_clips.py --audio-dir "audio/RAW Sessions" --extension WAV
 python scripts/extract_mel.py
 python scripts/make_dataset.py
+python scripts/train.hierarchical_with_cycle.py
 ```
+
+### Todo
+- [ ] Train `melgan-neurips`.
+- [ ] Document how to combine the models for generation.
