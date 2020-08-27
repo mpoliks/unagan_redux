@@ -82,3 +82,9 @@ Some generated audio samples can be found in:
 ```
 samples/
 ```
+
+
+## Train on our own dataset
+```
+python scripts/collect_audio_clips.py --audio-dir "audio/RAW Sessions" --extension WAV
+```

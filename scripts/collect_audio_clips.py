@@ -1,64 +1,62 @@
-import os
-# import numpy as np
+from pathlib import Path
+
+import numpy as np
 import librosa
 from pydub import AudioSegment
-# from shutil import copyfile
+import click
+
 from multiprocessing import Pool
 
 
 def process_one(args):
-    fn, out_dir = args
 
-    in_fp = os.path.join(audio_dir, f'{fn}.wav')
-    if not os.path.exists(in_fp):
-        print('Not exists')
-        return
+    path, out_dir = args
+    print(f"Processing {path}")
 
-    duration = librosa.get_duration(filename=in_fp)
+    duration = librosa.get_duration(filename=path)
+    subclip_duration = 10
+    num_subclips = int(np.ceil(duration / subclip_duration))
 
-    # duration = song.duration_seconds
-    num_subclips = int(duration // subclip_duration)
-    # num_subclips = int(np.ceil(duration / subclip_duration))
-
-    try:
-        song = AudioSegment.from_mp3(in_fp)
-    except Exception:
-        print('Error in loading')
-        return
+    song = AudioSegment.from_wav(path)
 
     for ii in range(num_subclips):
-        start = ii*subclip_duration
-        end = (ii+1)*subclip_duration
-        print(fn, start, end)
+        start = ii * subclip_duration
+        end = (ii + 1) * subclip_duration
+        print(path, start, end)
 
-        out_fp = os.path.join(out_dir, f'{fn}.{start}_{end}.mp3')
-        if os.path.exists(out_fp):
-            print('Done before')
+        out_path = out_dir / f"{path.name}.{start}_{end}.mp3"
+        if out_path.exists():
+            print(f"Path {out_path} exists. Done before.")
             continue
 
-        subclip = song[start*1000:end*1000]
-        subclip.export(out_fp, format='mp3')
+        subclip = song[start * 1000 : end * 1000]
+        subclip.export(out_path, format="mp3")
 
 
-if __name__ == '__main__':
-    audio_dir = './path/to/audios/'  # Clean audios or separated audios from mixture
-    out_dir = './training_data/clips/'
+@click.command()
+@click.option(
+    "--audio-dir",
+    "-a",
+    required=True,
+    type=click.Path(exists=True),
+    help="Clean audios or separated audios from mixture",
+)
+@click.option("--extension", "-e", default="*")
+@click.option(
+    "--out-dir", "-o", type=click.Path(), default="./training_data/clips",
+)
+def collect_audio_clips(audio_dir, out_dir, extension):
+    audio_dir = Path(audio_dir)
+    out_dir = Path(out_dir)
 
-    subclip_duration = 10
-    sr = 22050
-    ext = '.wav'
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    # ### Process ###
-    num_samples = int(round(subclip_duration * sr))
-    os.makedirs(out_dir, exist_ok=True)
+    paths = sorted(audio_dir.glob(f"*.{extension}"))
+    args_list = [(path, out_dir) for path in paths]
 
-    fns = [fn.replace(ext, '') for fn in os.listdir(audio_dir)]
-
-    pool = Pool(10)
-
-    args_list = []
-
-    for fn in fns:
-        args_list.append((fn, out_dir))
-
+    pool = Pool()
     pool.map(process_one, args_list)
+
+
+if __name__ == "__main__":
+    collect_audio_clips()
