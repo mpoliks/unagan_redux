@@ -5,6 +5,7 @@ import yaml
 import librosa
 import sys
 import numpy as np
+import soundfile as sf
 
 from pydub import AudioSegment
 
@@ -24,7 +25,7 @@ class RCBlock(nn.Module):
     def __init__(self, feat_dim, ks, dilation, num_groups):
         super().__init__()
         # ks = 3  # kernel size
-        ksm1 = ks-1
+        ksm1 = ks - 1
         mfd = feat_dim
         di = dilation
         self.num_groups = num_groups
@@ -32,13 +33,15 @@ class RCBlock(nn.Module):
         self.relu = nn.LeakyReLU()
 
         self.rec = nn.GRU(mfd, mfd, num_layers=1, batch_first=True, bidirectional=True)
-        self.conv = nn.Conv1d(mfd, mfd, ks, 1, ksm1*di//2, dilation=di, groups=num_groups)
+        self.conv = nn.Conv1d(
+            mfd, mfd, ks, 1, ksm1 * di // 2, dilation=di, groups=num_groups
+        )
         self.gn = nn.GroupNorm(num_groups, mfd)
 
     def init_hidden(self, batch_size, hidden_size):
         num_layers = 1
         num_directions = 2
-        hidden = torch.zeros(num_layers*num_directions, batch_size, hidden_size)
+        hidden = torch.zeros(num_layers * num_directions, batch_size, hidden_size)
         hidden.normal_(0, 1)
         return hidden
 
@@ -51,7 +54,7 @@ class RCBlock(nn.Module):
         r, _ = self.rec(r, hidden)
         r = r.transpose(1, 2).view(bs, 2, mfd, nf).sum(1)
         c = self.relu(self.gn(self.conv(r)))
-        x = x+r+c
+        x = x + r + c
 
         return x
 
@@ -129,9 +132,11 @@ class HierarchicalGenerator(nn.Module):
         x_head = self.head0(x_body)
 
         # print(len(self.blocks))
-        for ii, (block, head, scale_factor) in enumerate(zip(self.blocks, self.heads, z_scale_factors)):
-            x_body = F.interpolate(x_body, scale_factor=scale_factor, mode='nearest')
-            x_head = F.interpolate(x_head, scale_factor=scale_factor, mode='nearest')
+        for ii, (block, head, scale_factor) in enumerate(
+            zip(self.blocks, self.heads, z_scale_factors)
+        ):
+            x_body = F.interpolate(x_body, scale_factor=scale_factor, mode="nearest")
+            x_head = F.interpolate(x_head, scale_factor=scale_factor, mode="nearest")
 
             # print(total_scale_factor, x.shape, cond_.shape)
             # nf = min(x.size(2), cond_.size(2))
@@ -199,31 +204,31 @@ def main(args):
     seed = args.seed
 
     # ### Data type ###
-    assert(data_type in ['singing', 'speech', 'piano', 'violin'])
+    # assert data_type in ["singing", "speech", "piano", "violin"]
 
     # ### Architecture type ###
     if data_type == "singing":
-        assert(arch_type in ['nh', 'h', 'hc'])
+        assert arch_type in ["nh", "h", "hc"]
     elif data_type == "speech":
-        assert(arch_type in ['h', 'hc'])
+        assert arch_type in ["h", "hc"]
     elif data_type == "piano":
-        assert(arch_type in ['hc'])
+        assert arch_type in ["hc"]
     elif data_type == "violin":
-        assert(arch_type in ['hc'])
+        assert arch_type in ["hc"]
 
-    if arch_type == 'nh':
-        arch_type = 'nonhierarchical'
-    elif arch_type == 'h':
-        arch_type = 'hierarchical'
-    elif arch_type == 'hc':
-        arch_type = 'hierarchical_with_cycle'
+    if arch_type == "nh":
+        arch_type = "nonhierarchical"
+    elif arch_type == "h":
+        arch_type = "hierarchical"
+    elif arch_type == "hc":
+        arch_type = "hierarchical_with_cycle"
 
     # ### Model type ###
-    model_type = f'{data_type}.{arch_type}'
+    model_type = f"{data_type}.{arch_type}"
 
     # ### Model info ###
     if output_folder is None:
-        output_folder = f'generated_samples/{model_type}'
+        output_folder = f"generated_samples/{model_type}"
     os.makedirs(output_folder, exist_ok=True)
 
     z_dim = 20
@@ -232,10 +237,10 @@ def main(args):
 
     feat_dim = 80
 
-    param_fp = f'models/{data_type}/params.generator.{arch_type}.pt'
+    param_fp = f"models/{data_type}/params.generator.{arch_type}.pt"
 
-    mean_fp = f'models/{data_type}/mean.mel.npy'
-    std_fp = f'models/{data_type}/std.mel.npy'
+    mean_fp = f"models/{data_type}/mean.mel.npy"
+    std_fp = f"models/{data_type}/std.mel.npy"
 
     mean = torch.from_numpy(np.load(mean_fp)).float().view(1, feat_dim, 1)
     std = torch.from_numpy(np.load(std_fp)).float().view(1, feat_dim, 1)
@@ -244,51 +249,56 @@ def main(args):
         std = std.cuda(gid)
 
     # ### Vocoder info ###
-    vocoder_dir = f'models/{data_type}/vocoder/'
-    vocoder_config_fp = os.path.join(vocoder_dir, 'args.yml')
-    vocoder_config = read_yaml(vocoder_config_fp)
+    vocoder_dir = f"models/{data_type}/vocoder/"
+    vocoder_config_fp = os.path.join(vocoder_dir, "args.yml")
+    # vocoder_config = read_yaml(vocoder_config_fp)
 
     # ### Import ###
     # sys.path.append('..')
 
+    ### TODO avoid hardcoding
     # ### Vocoder settings ###
     hop_length = 256
     sampling_rate = 22050
-    n_mel_channels = vocoder_config.n_mel_channels
-    ngf = vocoder_config.ngf
-    n_residual_layers = vocoder_config.n_residual_layers
+    # n_mel_channels = vocoder_config.n_mel_channels
+    n_mel_channels = 80
+    # ngf = vocoder_config.ngf
+    ngf = 32  # all provided models use this
+    # n_residual_layers = vocoder_config.n_residual_layers
+    n_residual_layers = 3  # all provided models use this
     sr = sampling_rate
 
     num_frames = int(np.ceil(duration * (sr / hop_length)))
 
     # ### Generator ###
-    if arch_type == 'nonhierarchical':
+    if arch_type == "nonhierarchical":
         generator = NonHierarchicalGenerator(n_mel_channels, z_dim)
-    elif arch_type.startswith('hierarchical'):
+    elif arch_type.startswith("hierarchical"):
         generator = HierarchicalGenerator(n_mel_channels, z_dim, z_scale_factors)
 
     generator.eval()
     for p in generator.parameters():
         p.requires_grad = False
 
-    manager.load_model(param_fp, generator, device_id='cpu')
+    manager.load_model(param_fp, generator, device_id="cpu")
 
     if gid >= 0:
         generator = generator.cuda(gid)
 
     # ### Vocoder ###
-    vocoder_model_dir = f'models/{data_type}/vocoder/'
+    vocoder_model_dir = f"models/{data_type}/vocoder/"
     sys.path.append(vocoder_model_dir)
     import modules
-    if data_type == 'speech':
-        vocoder_name = 'OriginalGenerator'
+
+    if data_type == "speech":
+        vocoder_name = "OriginalGenerator"
     else:
-        vocoder_name = 'GRUGenerator'
+        vocoder_name = "GRUGenerator"
     MelGAN = getattr(modules, vocoder_name)
     vocoder = MelGAN(n_mel_channels, ngf, n_residual_layers)
     vocoder.eval()
 
-    vocoder_param_fp = os.path.join(vocoder_model_dir, 'params.pt')
+    vocoder_param_fp = os.path.join(vocoder_model_dir, "params.pt")
     vocoder.load_state_dict(torch.load(vocoder_param_fp))
 
     if gid >= 0:
@@ -297,14 +307,18 @@ def main(args):
     # ### Process ###
     torch.manual_seed(seed)
     for ii in range(num_samples):
-        print(f'Generate sample {ii}')
-        out_fp_wav = os.path.join(output_folder, f'{ii}.wav')
-        out_fp_mp3 = os.path.join(output_folder, f'{ii}.mp3')
+        print(f"Generate sample {ii}")
+        out_fp_wav = os.path.join(output_folder, f"{ii}.wav")
+        out_fp_mp3 = os.path.join(output_folder, f"{ii}.mp3")
 
-        if arch_type == 'nonhierarchical':
+        if arch_type == "nonhierarchical":
             z = torch.zeros((1, z_dim, num_frames)).normal_(0, 1).float()
-        elif arch_type.startswith('hierarchical'):
-            z = torch.zeros((1, z_dim, int(np.ceil(num_frames / z_total_scale_factor)))).normal_(0, 1).float()
+        elif arch_type.startswith("hierarchical"):
+            z = (
+                torch.zeros((1, z_dim, int(np.ceil(num_frames / z_total_scale_factor))))
+                .normal_(0, 1)
+                .float()
+            )
 
         if gid >= 0:
             z = z.cuda(gid)
@@ -320,7 +334,7 @@ def main(args):
                 audio = audio.squeeze().cpu().numpy()
 
         # Save to wav
-        librosa.output.write_wav(out_fp_wav, audio, sr=sr)
+        sf.write(out_fp_wav, audio, sr)
 
         # Convert to mp3
         AudioSegment.from_wav(out_fp_wav).export(out_fp_mp3, format="mp3")
@@ -328,19 +342,23 @@ def main(args):
 
 
 def parse_argument():
-    parser = argparse.ArgumentParser(description='Uncondtional Singing Voice Generation')
+    parser = argparse.ArgumentParser(
+        description="Uncondtional Singing Voice Generation"
+    )
 
     parser.add_argument(
-        '--data_type', '-d',
+        "--data_type",
+        "-d",
         dest="data_type",
-        default='singing',
+        default="singing",
         help='Data type. Options: "singing"(Default)|"speech"|"piano"|"violin"',
     )
 
     parser.add_argument(
-        '--arch_type', '-a',
+        "--arch_type",
+        "-a",
         dest="arch_type",
-        default='hc',
+        default="hc",
         help='Architecture type. Options: \
         "nh" for non-hierarchical, available to singing|\
         "h" for hierarchical, available to singing and speech|\
@@ -348,39 +366,40 @@ def parse_argument():
     )
 
     parser.add_argument(
-        '--output_folder', '-o',
-        dest='output_folder',
+        "--output_folder",
+        "-o",
+        dest="output_folder",
         default=None,
-        help='Output folder',
+        help="Output folder",
     )
 
     parser.add_argument(
-        '--duration',
-        dest='duration',
+        "--duration",
+        dest="duration",
         default=10,
-        help='Sample duration (second)',
+        help="Sample duration (second)",
+        type=float,
     )
 
     parser.add_argument(
-        '--num_samples', '-ns',
-        dest='num_samples',
+        "--num_samples",
+        "-ns",
+        dest="num_samples",
         default=5,
-        help='Number of samples to be generated',
+        help="Number of samples to be generated",
+        type=int,
     )
 
     parser.add_argument(
-        '--gid',
-        dest='gid',
+        "--gid",
+        dest="gid",
         default=-1,
         type=int,
-        help='GPU id. Default: -1 for using cpu'
+        help="GPU id. Default: -1 for using cpu",
     )
 
     parser.add_argument(
-        '--seed',
-        dest='seed',
-        default=123,
-        help='Random seed. Default: 123'
+        "--seed", dest="seed", default=123, help="Random seed. Default: 123"
     )
 
     args = parser.parse_args()
@@ -388,7 +407,7 @@ def parse_argument():
     return args
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 
     args = parse_argument()
 
