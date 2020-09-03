@@ -251,21 +251,17 @@ def main(args):
     # ### Vocoder info ###
     vocoder_dir = f"models/{data_type}/vocoder/"
     vocoder_config_fp = os.path.join(vocoder_dir, "args.yml")
-    # vocoder_config = read_yaml(vocoder_config_fp)
+    vocoder_config = read_yaml(vocoder_config_fp)
 
     # ### Import ###
     # sys.path.append('..')
 
-    ### TODO avoid hardcoding
     # ### Vocoder settings ###
     hop_length = 256
     sampling_rate = 22050
-    # n_mel_channels = vocoder_config.n_mel_channels
-    n_mel_channels = 80
-    # ngf = vocoder_config.ngf
-    ngf = 32  # all provided models use this
-    # n_residual_layers = vocoder_config.n_residual_layers
-    n_residual_layers = 3  # all provided models use this
+    n_mel_channels = vocoder_config.n_mel_channels
+    ngf = vocoder_config.ngf
+    n_residual_layers = vocoder_config.n_residual_layers
     sr = sampling_rate
 
     num_frames = int(np.ceil(duration * (sr / hop_length)))
