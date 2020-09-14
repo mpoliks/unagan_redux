@@ -69,6 +69,8 @@ One may use the following steps to train their own models.
 0. (Singing only) Separate singing voices from the audios you collect.
 We use a separation model we developed. You can use open-sourced ones such as [Open-Unmix](https://github.com/sigsep/open-unmix-pytorch) or [Spleeter](https://github.com/deezer/spleeter).
 
+    wandb login # Only if not logged in yet.
+
     python scripts/collect_audio_clips.py --audio-dir "audio/RAW Sessions" --extension WAV
     python scripts/extract_mel.py
     python scripts/make_dataset.py

@@ -3,3 +3,4 @@ numpy
 pydub
 pyyaml
 librosa
+wandb
