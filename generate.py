@@ -258,7 +258,7 @@ def main(args):
 
     # ### Vocoder settings ###
     hop_length = 256
-    sampling_rate = 22050
+    sampling_rate = 44100
     n_mel_channels = vocoder_config.n_mel_channels
     ngf = vocoder_config.ngf
     n_residual_layers = vocoder_config.n_residual_layers
