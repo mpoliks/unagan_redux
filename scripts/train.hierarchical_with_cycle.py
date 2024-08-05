@@ -27,6 +27,25 @@ import wandb
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 
+def print_data_statistics(data_loader):
+    for batch in data_loader:
+        if isinstance(batch, (list, tuple)):
+            inputs = batch[0]
+        else:
+            inputs = batch
+        print("Data mean:", torch.mean(inputs.float()))
+        print("Data std:", torch.std(inputs.float()))
+        print("Data min:", torch.min(inputs.float()))
+        print("Data max:", torch.max(inputs.float()))
+        break  # Only print for the first batch
+
+
+def check_for_nans(tensor, name):
+    if torch.isnan(tensor).any() or torch.isinf(tensor).any():
+        print(f"NaN or Inf detected in {name}")
+        exit(1)
+
+
 loss_funcs = OrderedDict(
     [
         ("G", None),
@@ -136,6 +155,7 @@ def validate(epoch, step):
             )
 
             fake_voc = netG(z)
+            check_for_nans(fake_voc, "fake_voc")
 
             z_fake = netE(fake_voc)
             z_real = netE(voc)
@@ -643,6 +663,8 @@ if __name__ == "__main__":
     )
     print("tr: {}, va: {}".format(num_tr, num_va))
 
+    print_data_statistics(iterator_tr)
+
     inf_iterator_tr = make_inf_iterator(iterator_tr)
 
     # Prepare mean and std
@@ -694,165 +716,154 @@ if __name__ == "__main__":
         manager.save_initial()
 
     # ### Train ###
-    for epoch in range(init_epoch, 1 + num_epochs):
-        print(model_id)
-        t0 = time.time()
+# ### Train ###
+# Training loop
+for epoch in range(init_epoch, 1 + num_epochs):
+    print(model_id)
+    t0 = time.time()
 
-        # ### Training ###
-        print("Training...")
-        sum_losses_tr = OrderedDict([(loss_name, 0) for loss_name in loss_funcs])
+    print("Training...")
+    sum_losses_tr = OrderedDict([(loss_name, 0) for loss_name in loss_funcs])
+    count_all_tr = 0
+    num_batches_tr = batches_per_epoch
 
-        count_all_tr = 0
+    tt0 = time.time()
 
-        num_batches_tr = batches_per_epoch
+    netG.train()
+    netD.train()
+    netE.train()
+    for i_batch in range(batches_per_epoch):
+        batch = next(inf_iterator_tr)
+        step = epoch * batches_per_epoch + i_batch
 
-        tt0 = time.time()
+        voc = batch.cuda()
+        voc = (voc - mean) / std
+        bs, _, nf = voc.size()
 
-        # In training, set net.train()
-        netG.train()
-        netD.train()
-        netE.train()
-        for i_batch in range(batches_per_epoch):
-            batch = next(inf_iterator_tr)
-            step = epoch * batches_per_epoch + i_batch
+        z = torch.zeros((bs, z_dim, int(np.ceil(nf / z_total_scale_factor)))).normal_(0, 1).float().cuda()
+        fake_voc = netG(z)
+        check_for_nans(fake_voc, "fake_voc")
 
-            # voc.shape=(bs, feat_dim, num_frames)
-            voc = batch
+        z_fake = netE(fake_voc)
+        z_real = netE(voc)
 
-            voc = voc.cuda()
-            voc = (voc - mean) / std
+        gloss = torch.mean(torch.abs(netD(fake_voc) - fake_voc))
+        check_for_nans(gloss, "gloss")
 
-            bs, _, nf = voc.size()
+        noise_rloss = torch.mean(torch.abs(z_fake - z))
+        check_for_nans(noise_rloss, "noise_rloss")
 
-            # ### Train generator ###
-            z = (
-                torch.zeros((bs, z_dim, int(np.ceil(nf / z_total_scale_factor))))
-                .normal_(0, 1)
-                .float()
-                .cuda()
-            )
+        real_rloss = torch.mean(torch.abs(netG(z_real)[..., :nf] - voc[..., :nf]))
+        check_for_nans(real_rloss, "real_rloss")
 
-            fake_voc = netG(z)
+        # Print intermediate values
+        print(f"Intermediate values at epoch {epoch}, batch {i_batch}")
+        print(f"fake_voc: {fake_voc}")
+        print(f"z_fake: {z_fake}")
+        print(f"z_real: {z_real}")
+        print(f"gloss: {gloss}")
+        print(f"noise_rloss: {noise_rloss}")
+        print(f"real_rloss: {real_rloss}")
 
-            z_fake = netE(fake_voc)
-            z_real = netE(voc)
+        netG.zero_grad()
+        netE.zero_grad()
+        (gloss + lambda_cycle * (noise_rloss + real_rloss)).backward(retain_graph=True)
+        if max_grad_norm is not None:
+            clip_grad_norm_(netG.parameters(), max_grad_norm)
+            clip_grad_norm_(netE.parameters(), max_grad_norm)
+        optimizerG.step()
+        optimizerE.step()
 
-            gloss = torch.mean(torch.abs(netD(fake_voc) - fake_voc))
-            noise_rloss = torch.mean(torch.abs(z_fake - z))
-            real_rloss = torch.mean(torch.abs(netG(z_real)[..., :nf] - voc[..., :nf]))
+        real_dloss = torch.mean(torch.abs(netD(voc) - voc))
+        check_for_nans(real_dloss, "real_dloss")
 
-            # Back propagation
-            netG.zero_grad()
-            netE.zero_grad()
-            (gloss + lambda_cycle * (noise_rloss + real_rloss)).backward(
-                retain_graph=True
-            )
-            if max_grad_norm is not None:
-                clip_grad_norm_(netG.parameters(), max_grad_norm)
-                clip_grad_norm_(netE.parameters(), max_grad_norm)
+        fake_dloss = torch.mean(torch.abs(netD(fake_voc.detach()) - fake_voc.detach()))
+        check_for_nans(fake_dloss, "fake_dloss")
 
-            optimizerG.step()
-            optimizerE.step()
+        dloss = real_dloss - k * fake_dloss
+        check_for_nans(dloss, "dloss")
 
-            # ### Train discriminator ###
-            real_dloss = torch.mean(torch.abs(netD(voc) - voc))
-            fake_dloss = torch.mean(
-                torch.abs(netD(fake_voc.detach()) - fake_voc.detach())
-            )
+        # Print intermediate values for discriminator
+        print(f"real_dloss: {real_dloss}")
+        print(f"fake_dloss: {fake_dloss}")
+        print(f"dloss: {dloss}")
 
-            dloss = real_dloss - k * fake_dloss
+        netD.zero_grad()
+        dloss.backward()
 
-            # Update
-            netD.zero_grad()
-            dloss.backward()
-            if max_grad_norm is not None:
-                clip_grad_norm_(netD.parameters(), max_grad_norm)
+        if max_grad_norm is not None:
+            clip_grad_norm_(netD.parameters(), max_grad_norm)
+        optimizerD.step()
 
-            optimizerD.step()
+        k, convergence = recorder(real_dloss, fake_dloss, update_k=True)
 
-            # ### Convergence and update k ###
-            k, convergence = recorder(real_dloss, fake_dloss, update_k=True)
-
-            # ### Losses ###
-            losses = OrderedDict(
-                [
-                    ("G", gloss),
-                    ("D", dloss),
-                    ("RealD", real_dloss),
-                    ("FakeD", fake_dloss),
-                    ("Convergence", convergence),
-                    ("NoiseRecon", noise_rloss),
-                    ("RealRecon", real_rloss),
-                ]
-            )
-
-            wandb.log({"loss/train": losses, "epoch": epoch}, step=step)
-            # ### Misc ###
-
-            # Accumulate losses
-            losses_tr = OrderedDict(
-                [(loss_name, lo.item()) for loss_name, lo in losses.items()]
-            )
-
-            for loss_name, lo in losses_tr.items():
-                sum_losses_tr[loss_name] += lo
-
-            count_all_tr += 1
-
-            # ### Print info ###
-            if i_batch % 10 == 0:
-                batch_info = "Epoch {}. Batch: {}/{}, T: {:.3f}, ".format(
-                    epoch, i_batch, num_batches_tr, time.time() - tt0
-                ) + "".join(
-                    [
-                        "(tr) {}: {:.5f}, ".format(loss_name, lo)
-                        for loss_name, lo in losses_tr.items()
-                    ]
-                )
-                print(batch_info, k)
-            tt0 = time.time()
-
-        # Compute average loss
-        mean_losses_tr = OrderedDict(
+        losses = OrderedDict(
             [
-                (loss_name, slo / count_all_tr)
-                for loss_name, slo in sum_losses_tr.items()
+                ("G", gloss),
+                ("D", dloss),
+                ("RealD", real_dloss),
+                ("FakeD", fake_dloss),
+                ("Convergence", convergence),
+                ("NoiseRecon", noise_rloss),
+                ("RealRecon", real_rloss),
             ]
         )
 
-        # ### Validation ###
-        print("")
-        print("Validation...")
-        mean_losses_va = validate(epoch, step)
+        wandb.log({"loss/train": losses, "epoch": epoch}, step=step)
 
-        # ###########################################################################
-        # ### Check the best validation losses and save information in the middle ###
-        # ###########################################################################
-
-        # Check and update the best validation loss
-        va_metrics = [
-            (metric_name, mean_losses_va[metric_name], higher_or_lower)
-            for metric_name, higher_or_lower in eval_metrics
-        ]
-        best_va_metrics = manager.check_best_va_metrics(va_metrics, epoch)
-
-        # Save the record
-        record = {
-            "mean_losses_tr": mean_losses_tr,
-            "mean_losses_va": mean_losses_va,
-            "best_va_metrics": best_va_metrics,
-        }
-
-        manager.save_middle(epoch, record, va_metrics)
-        manager.print_record(record)
-        manager.print_record_in_one_line(best_va_metrics)
-        # ###########################################################################
-
-        t1 = time.time()
-        print(
-            "Epoch: {} finished. Time: {:.3f}. Model ID: {}".format(
-                epoch, t1 - t0, model_id
-            )
+        losses_tr = OrderedDict(
+            [(loss_name, lo.item()) for loss_name, lo in losses.items()]
         )
 
-    print(model_id)
+        for loss_name, lo in losses_tr.items():
+            sum_losses_tr[loss_name] += lo
+
+        count_all_tr += 1
+
+        if i_batch % 10 == 0:
+            batch_info = "Epoch {}. Batch: {}/{}, T: {:.3f}, ".format(
+                epoch, i_batch, num_batches_tr, time.time() - tt0
+            ) + "".join(
+                [
+                    "(tr) {}: {:.5f}, ".format(loss_name, lo)
+                    for loss_name, lo in losses_tr.items()
+                ]
+            )
+            print(batch_info, k)
+        tt0 = time.time()
+
+    mean_losses_tr = OrderedDict(
+        [
+            (loss_name, slo / count_all_tr)
+            for loss_name, slo in sum_losses_tr.items()
+        ]
+    )
+
+    print("")
+    print("Validation...")
+    mean_losses_va = validate(epoch, step)
+
+    va_metrics = [
+        (metric_name, mean_losses_va[metric_name], higher_or_lower)
+        for metric_name, higher_or_lower in eval_metrics
+    ]
+    best_va_metrics = manager.check_best_va_metrics(va_metrics, epoch)
+
+    record = {
+        "mean_losses_tr": mean_losses_tr,
+        "mean_losses_va": mean_losses_va,
+        "best_va_metrics": best_va_metrics,
+    }
+
+    manager.save_middle(epoch, record, va_metrics)
+    manager.print_record(record)
+    manager.print_record_in_one_line(best_va_metrics)
+
+    t1 = time.time()
+    print(
+        "Epoch: {} finished. Time: {:.3f}. Model ID: {}".format(
+            epoch, t1 - t0, model_id
+        )
+    )
+
+print(model_id)
