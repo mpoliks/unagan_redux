@@ -39,12 +39,11 @@ def print_data_statistics(data_loader):
         print("Data max:", torch.max(inputs.float()))
         break  # Only print for the first batch
 
-
 def check_for_nans(tensor, name):
     if torch.isnan(tensor).any() or torch.isinf(tensor).any():
         print(f"NaN or Inf detected in {name}")
+        print(tensor)  # Print the tensor to see the values
         exit(1)
-
 
 loss_funcs = OrderedDict(
     [
@@ -141,8 +140,10 @@ def validate(epoch, step):
 
             # voc.shape=(bs, feat_dim, num_frames)
             voc = batch
+            check_for_nans(voc, "validation voc before normalization")
             voc = voc.cuda()
             voc = (voc - mean) / std
+            check_for_nans(voc, "validation voc after normalization")
 
             bs, _, nf = voc.size()
 
@@ -153,27 +154,36 @@ def validate(epoch, step):
                 .float()
                 .cuda()
             )
+            check_for_nans(z, "validation z")
 
             fake_voc = netG(z)
-            check_for_nans(fake_voc, "fake_voc")
+            check_for_nans(fake_voc, "validation fake_voc")
 
             z_fake = netE(fake_voc)
             z_real = netE(voc)
 
             gloss = torch.mean(torch.abs(netD(fake_voc) - fake_voc))
+            check_for_nans(gloss, "validation gloss")
+
             noise_rloss = torch.mean(torch.abs(z_fake - z))
+            check_for_nans(noise_rloss, "validation noise_rloss")
+
             real_rloss = torch.mean(torch.abs(netG(z_real)[..., :nf] - voc[..., :nf]))
+            check_for_nans(real_rloss, "validation real_rloss")
 
             # ### Train discriminator ###
             real_dloss = torch.mean(torch.abs(netD(voc) - voc))
-            fake_dloss = torch.mean(
-                torch.abs(netD(fake_voc.detach()) - fake_voc.detach())
-            )
+            check_for_nans(real_dloss, "validation real_dloss")
+
+            fake_dloss = torch.mean(torch.abs(netD(fake_voc.detach()) - fake_voc.detach()))
+            check_for_nans(fake_dloss, "validation fake_dloss")
 
             dloss = real_dloss - k * fake_dloss
+            check_for_nans(dloss, "validation dloss")
 
             # ### Convergence ###
             _, convergence = recorder(real_dloss, fake_dloss, update_k=False)
+            check_for_nans(convergence, "validation convergence")
 
             # ### Losses ###
             losses = OrderedDict(
@@ -213,6 +223,7 @@ def validate(epoch, step):
     torch.cuda.set_rng_state(gpu_rng_state_tr)
 
     return mean_losses_va
+
 
 
 def make_inf_iterator(data_iterator):
@@ -753,7 +764,7 @@ for epoch in range(init_epoch, 1 + num_epochs):
         #print(f"raw voc before normalization: {voc}")
 
         check_for_nans(mean, "mean array")
-       # print(f"mean array: {mean}")
+        #print(f"mean array: {mean}")
 
         check_for_nans(std, "std array")
         #print(f"std array: {std}")

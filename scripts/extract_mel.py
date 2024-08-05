@@ -1,25 +1,9 @@
-# import glob
+import os
 import librosa
 import numpy as np
 import warnings
 from pathlib import Path
 from joblib import Parallel, delayed
-
-
-# from utils.display import *
-# from utils.dsp import *
-# import hparams as hp
-from librosa.filters import mel as librosa_mel_fn
-import torch
-from torch import nn
-from torch.nn import functional as F
-
-
-"""
-Modified from
-https://github.com/descriptinc/melgan-neurips/blob/master/mel2wav/modules.py#L26
-"""
-
 
 import torch
 import torch.nn as nn
@@ -78,7 +62,8 @@ class Audio2Mel(nn.Module):
         log_mel_spec = torch.log10(torch.clamp(mel_output, min=1e-5))
         return log_mel_spec
 
-
+def is_valid_data(data):
+    return not (np.isnan(data).any() or np.isinf(data).any())
 
 def convert_file(extract_func, sampling_rate, path):
     with warnings.catch_warnings():
@@ -100,7 +85,6 @@ def convert_file(extract_func, sampling_rate, path):
 
     return mel.astype(np.float32)
 
-
 def process_clip(extract_func, sampling_rate, base_out_dir, clip_path):
     id = Path(clip_path).stem
 
@@ -114,8 +98,10 @@ def process_clip(extract_func, sampling_rate, base_out_dir, clip_path):
         return
 
     mel = convert_file(extract_func, sampling_rate, clip_path)
-    np.save(out_fp, mel, allow_pickle=False)
-
+    if is_valid_data(mel):
+        np.save(out_fp, mel, allow_pickle=False)
+    else:
+        print(f"Skipping invalid data in file: {clip_path}")
 
 if __name__ == "__main__":
     base_out_dir = Path("./training_data/exp_data/")
