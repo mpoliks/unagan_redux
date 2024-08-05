@@ -552,16 +552,25 @@ class Encoder(nn.Module):
 
         # shape=(bs, 64, 10, nf_)
         x = self.body2d(x)
+        #print(f"Output after body2d: {x}")
+        #check_for_nans(x, "Output after body2d")
+
         # shape=(bs, 64*10, nf_)
         x = x.view(bs, -1, x.size(3))
+        #print(f"Output after view: {x}")
+        #check_for_nans(x, "Output after view")
 
         # ### Merging ###
         x = self.body1d(x)
+        #print(f"Output after body1d: {x}")
+        #check_for_nans(x, "Output after body1d")
 
         # ### Head ###
         # shape=(bs, input_size, nf)
         # out = torch.sigmoid(self.head(x))
         out = self.head(x)
+        #print(f"Output after head: {out}")
+        #check_for_nans(out, "Output after head")
 
         return out
 
@@ -663,12 +672,14 @@ if __name__ == "__main__":
     )
     print("tr: {}, va: {}".format(num_tr, num_va))
 
-    print_data_statistics(iterator_tr)
+    #print_data_statistics(iterator_tr)
 
     inf_iterator_tr = make_inf_iterator(iterator_tr)
 
     # Prepare mean and std
     mean_fp = os.path.join(data_dir, f"mean.{feat_type}.npy")
+    mean = np.load(mean_fp)
+    #print("Mean array from file:", mean)
     std_fp = os.path.join(data_dir, f"std.{feat_type}.npy")
 
     mean = torch.from_numpy(np.load(mean_fp)).float().cuda().view(1, feat_dim, 1)
@@ -718,6 +729,7 @@ if __name__ == "__main__":
     # ### Train ###
 # ### Train ###
 # Training loop
+# Training loop
 for epoch in range(init_epoch, 1 + num_epochs):
     print(model_id)
     t0 = time.time()
@@ -737,8 +749,23 @@ for epoch in range(init_epoch, 1 + num_epochs):
         step = epoch * batches_per_epoch + i_batch
 
         voc = batch.cuda()
+        check_for_nans(voc, "raw voc before normalization")
+        #print(f"raw voc before normalization: {voc}")
+
+        check_for_nans(mean, "mean array")
+       # print(f"mean array: {mean}")
+
+        check_for_nans(std, "std array")
+        #print(f"std array: {std}")
+
         voc = (voc - mean) / std
+        voc = (voc - mean) / std
+        check_for_nans(voc, "normalized voc")
+        #print(f"normalized voc: {voc}")
+
         bs, _, nf = voc.size()
+        check_for_nans(voc, "voc before netE")
+       # print(f"voc before netE: {voc}")
 
         z = torch.zeros((bs, z_dim, int(np.ceil(nf / z_total_scale_factor)))).normal_(0, 1).float().cuda()
         fake_voc = netG(z)
@@ -753,17 +780,15 @@ for epoch in range(init_epoch, 1 + num_epochs):
         noise_rloss = torch.mean(torch.abs(z_fake - z))
         check_for_nans(noise_rloss, "noise_rloss")
 
-        real_rloss = torch.mean(torch.abs(netG(z_real)[..., :nf] - voc[..., :nf]))
-        check_for_nans(real_rloss, "real_rloss")
+        # Print intermediate values for debugging real_rloss
+        #print(f"z_real: {z_real}")
+        intermediate_netG_z_real = netG(z_real)
+        #print(f"netG(z_real): {intermediate_netG_z_real}")
+        real_rloss_slice = intermediate_netG_z_real[..., :nf]
+        #print(f"real_rloss_slice: {real_rloss_slice}")
 
-        # Print intermediate values
-        print(f"Intermediate values at epoch {epoch}, batch {i_batch}")
-        print(f"fake_voc: {fake_voc}")
-        print(f"z_fake: {z_fake}")
-        print(f"z_real: {z_real}")
-        print(f"gloss: {gloss}")
-        print(f"noise_rloss: {noise_rloss}")
-        print(f"real_rloss: {real_rloss}")
+        real_rloss = torch.mean(torch.abs(real_rloss_slice - voc[..., :nf]))
+        check_for_nans(real_rloss, "real_rloss")
 
         netG.zero_grad()
         netE.zero_grad()
@@ -783,10 +808,9 @@ for epoch in range(init_epoch, 1 + num_epochs):
         dloss = real_dloss - k * fake_dloss
         check_for_nans(dloss, "dloss")
 
-        # Print intermediate values for discriminator
-        print(f"real_dloss: {real_dloss}")
-        print(f"fake_dloss: {fake_dloss}")
-        print(f"dloss: {dloss}")
+        #print(f"real_dloss: {real_dloss}")
+        #print(f"fake_dloss: {fake_dloss}")
+        #print(f"dloss: {dloss}")
 
         netD.zero_grad()
         dloss.backward()
@@ -867,3 +891,4 @@ for epoch in range(init_epoch, 1 + num_epochs):
     )
 
 print(model_id)
+

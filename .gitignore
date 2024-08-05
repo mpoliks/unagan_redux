@@ -1,3 +1,4 @@
 /audio
 /training_data
 /wandb
+/checkpoints
