@@ -21,6 +21,11 @@ https://github.com/descriptinc/melgan-neurips/blob/master/mel2wav/modules.py#L26
 """
 
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import librosa
+
 class Audio2Mel(nn.Module):
     def __init__(
         self,
@@ -36,18 +41,25 @@ class Audio2Mel(nn.Module):
         ##############################################
         # FFT Parameters                              #
         ##############################################
-        window = torch.hann_window(win_length).float()
-        mel_basis = librosa_mel_fn(
-            sampling_rate, n_fft, n_mel_channels, mel_fmin, mel_fmax
-        )
-        mel_basis = torch.from_numpy(mel_basis).float()
-        self.register_buffer("mel_basis", mel_basis)
-        self.register_buffer("window", window)
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.win_length = win_length
         self.sampling_rate = sampling_rate
         self.n_mel_channels = n_mel_channels
+        self.mel_fmin = mel_fmin
+        self.mel_fmax = mel_fmax
+
+        window = torch.hann_window(win_length).float()
+        mel_basis = librosa.filters.mel(
+            sr=self.sampling_rate,
+            n_fft=self.n_fft,
+            n_mels=self.n_mel_channels,
+            fmin=self.mel_fmin,
+            fmax=self.mel_fmax
+        )
+        mel_basis = torch.from_numpy(mel_basis).float()
+        self.register_buffer("mel_basis", mel_basis)
+        self.register_buffer("window", window)
 
     def forward(self, audio):
         p = (self.n_fft - self.hop_length) // 2
@@ -65,6 +77,7 @@ class Audio2Mel(nn.Module):
         mel_output = torch.matmul(self.mel_basis, magnitude)
         log_mel_spec = torch.log10(torch.clamp(mel_output, min=1e-5))
         return log_mel_spec
+
 
 
 def convert_file(extract_func, sampling_rate, path):
