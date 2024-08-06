@@ -383,7 +383,7 @@ class Encoder(nn.Module):
 
 # Early Stopping class
 class EarlyStopping:
-    def __init__(self, patience=10, min_delta=0):
+    def __init__(self, patience=20, min_delta=0.0001):
         self.patience = patience
         self.min_delta = min_delta
         self.best_loss = None
@@ -420,11 +420,11 @@ def update_and_plot_metrics(epoch, mean_losses_tr, mean_losses_va):
     plt.title('Training vs Validation Convergence')
     
     # Save plot to file
-    plot_path = f'epoch_{epoch}_metrics.png'
+    plot_path = 'metrics.png'
     plt.savefig(plot_path)
     plt.close()
 
-    print(f"Plot for epoch {epoch} saved as {plot_path}. Please view it manually.")
+    print(f"Plot saved as {plot_path}. Please view it manually.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -515,7 +515,7 @@ if __name__ == "__main__":
         manager.save_initial()
 
     # Initialize early stopping
-    early_stopping = EarlyStopping(patience=10, min_delta=0.001)
+    early_stopping = EarlyStopping(patience=20, min_delta=0.0001)
 
     for epoch in range(init_epoch, 1 + num_epochs):
         print(model_id)
