@@ -2,3 +2,5 @@
 /training_data
 /wandb
 /checkpoints
+/models
+/genrated_samples
