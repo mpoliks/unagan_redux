@@ -18,6 +18,7 @@ from torch.nn.utils import clip_grad_norm_
 from torch.nn.utils import spectral_norm
 from torch.cuda.amp import autocast, GradScaler
 import wandb
+import matplotlib.pyplot as plt
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 
@@ -399,6 +400,32 @@ class EarlyStopping:
                 return True  # Stop training
             return False
 
+# Placeholder lists to store metrics
+epochs = []
+training_convergence = []
+validation_convergence = []
+
+def update_and_plot_metrics(epoch, mean_losses_tr, mean_losses_va):
+    epochs.append(epoch)
+    training_convergence.append(mean_losses_tr["Convergence"])
+    validation_convergence.append(mean_losses_va["Convergence"])
+
+    # Plot metrics
+    plt.figure(figsize=(10, 5))
+    plt.plot(epochs, training_convergence, label='Training Convergence', marker='o')
+    plt.plot(epochs, validation_convergence, label='Validation Convergence', marker='o')
+    plt.xlabel('Epochs')
+    plt.ylabel('Convergence Loss')
+    plt.legend()
+    plt.title('Training vs Validation Convergence')
+    
+    # Save plot to file
+    plot_path = f'epoch_{epoch}_metrics.png'
+    plt.savefig(plot_path)
+    plt.close()
+
+    print(f"Plot for epoch {epoch} saved as {plot_path}. Please view it manually.")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-id", type=str)
@@ -591,9 +618,13 @@ if __name__ == "__main__":
         t1 = time.time()
         print("Epoch: {} finished. Time: {:.3f}. Model ID: {}".format(epoch, t1 - t0, model_id))
 
+        # Update and plot metrics after each epoch
+        update_and_plot_metrics(epoch, mean_losses_tr, mean_losses_va)
+
         # Early stopping check after each epoch
         if early_stopping.step(mean_losses_va["RealRecon"]):
             print(f"Early stopping at epoch {epoch}")
             break
 
     print(model_id)
+
