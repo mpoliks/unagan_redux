@@ -116,7 +116,7 @@ The `unagan` model also needs to be moved, for example:
 
 Generation can then be done via
 
-    python generate.py --gid 1 --data_type custom --arch_type hc --duration 10 --num_samples 10
+    python generate.py --gid 0 --data_type custom --arch_type hc --duration 10 --num_samples 10
 
 ### Todo
 - [X] Train `melgan-neurips`.
