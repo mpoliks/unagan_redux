@@ -3,5 +3,5 @@
 /wandb
 /checkpoints
 /models
-/genrated_samples
+/generated_samples
 metrics.png
