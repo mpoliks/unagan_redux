@@ -14,7 +14,7 @@ def process_one(args):
     print(f"Processing {path}")
 
     duration = librosa.get_duration(filename=path)
-    subclip_duration = 10
+    subclip_duration = 30
     num_subclips = int(np.ceil(duration / subclip_duration))
 
     song = AudioSegment.from_wav(path)

@@ -46,21 +46,46 @@ class Audio2Mel(nn.Module):
         self.register_buffer("window", window)
 
     def forward(self, audio):
-        p = (self.n_fft - self.hop_length) // 2
+        # Adjust n_fft dynamically based on the input length
+        if audio.size(-1) < self.n_fft:
+            n_fft = audio.size(-1) // 2 * 2  # Ensure n_fft is even and fits within input length
+        else:
+            n_fft = self.n_fft
+
+        # Adjust mel_basis if n_fft changes
+        if n_fft != self.n_fft:
+            mel_basis = librosa.filters.mel(
+                sr=self.sampling_rate,
+                n_fft=n_fft,
+                n_mels=self.n_mel_channels,
+                fmin=self.mel_fmin,
+                fmax=self.mel_fmax
+            )
+            mel_basis = torch.from_numpy(mel_basis).float()
+        else:
+            mel_basis = self.mel_basis
+
+        p = (n_fft - self.hop_length) // 2
         audio = F.pad(audio, (p, p), "reflect").squeeze(1)
+        
         fft = torch.stft(
             audio,
-            n_fft=self.n_fft,
+            n_fft=n_fft,
             hop_length=self.hop_length,
             win_length=self.win_length,
-            window=self.window,
+            window=self.window[:self.win_length],  # Adjust the window size accordingly
             center=False,
+            return_complex=False  # For future compatibility
         )
         real_part, imag_part = fft.unbind(-1)
         magnitude = torch.sqrt(real_part ** 2 + imag_part ** 2)
-        mel_output = torch.matmul(self.mel_basis, magnitude)
+        mel_output = torch.matmul(mel_basis, magnitude)
         log_mel_spec = torch.log10(torch.clamp(mel_output, min=1e-5))
         return log_mel_spec
+
+
+
+
 
 def is_valid_data(data):
     return not (np.isnan(data).any() or np.isinf(data).any())
